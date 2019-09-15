@@ -1,1 +1,7 @@
 TEst2
+
+Ignore.log
+jfile.txt
+jfile2.txt
+LICENSE.txt
+README.md
