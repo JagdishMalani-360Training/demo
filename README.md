@@ -13,5 +13,9 @@ README.md
 
 Make changes again
 
+<<<<<<< HEAD
 Stashing test: Changing file from the master branch
+=======
+Stashing test Made changes from very-bad branch
+>>>>>>> very-bad
 
