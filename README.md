@@ -13,5 +13,5 @@ README.md
 
 Make changes again
 
-Stashing test
+Stashing test: Changing file from the master branch
 
