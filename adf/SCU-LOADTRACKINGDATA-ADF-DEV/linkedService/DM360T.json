@@ -1,0 +1,12 @@
+{
+	"name": "DM360T",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"annotations": [],
+		"type": "AzureSqlDatabase",
+		"typeProperties": {
+			"connectionString": "integrated security=False;encrypt=True;connection timeout=30;data source=scu-sql-dev-dw.database.windows.net;initial catalog=DM360T_Dev;user id=dw_user",
+			"encryptedCredential": "ew0KICAiVmVyc2lvbiI6ICIyMDE3LTExLTMwIiwNCiAgIlByb3RlY3Rpb25Nb2RlIjogIktleSIsDQogICJTZWNyZXRDb250ZW50VHlwZSI6ICJQbGFpbnRleHQiLA0KICAiQ3JlZGVudGlhbElkIjogIlNDVS1MT0FEVFJBQ0tJTkdEQVRBLUFERi1ERVZfNmVmYTkzOWItMjRkOC00MzllLWI4MmQtMWIxY2Y2YmMxMTdmIg0KfQ=="
+		}
+	}
+}
