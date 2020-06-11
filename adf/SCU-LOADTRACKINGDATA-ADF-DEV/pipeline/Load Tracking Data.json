@@ -4,6 +4,7 @@
 		"activities": [
 			{
 				"name": "LookupTrackingMetaData",
+				"description": "Looking up tracking master data",
 				"type": "Lookup",
 				"dependsOn": [
 					{
