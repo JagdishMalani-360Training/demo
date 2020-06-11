@@ -1,0 +1,13 @@
+{
+	"name": "MySqlTrackingTable",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "MySql_360Tracking",
+			"type": "LinkedServiceReference"
+		},
+		"annotations": [],
+		"type": "MySqlTable",
+		"schema": []
+	},
+	"type": "Microsoft.DataFactory/factories/datasets"
+}
