@@ -2,7 +2,7 @@
 	"name": "Trigger360TrackingData",
 	"properties": {
 		"annotations": [],
-		"runtimeState": "Started",
+		"runtimeState": "Stopped",
 		"pipelines": [
 			{
 				"pipelineReference": {
