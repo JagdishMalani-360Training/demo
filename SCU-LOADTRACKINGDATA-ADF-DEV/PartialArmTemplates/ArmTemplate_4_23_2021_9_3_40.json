@@ -1,0 +1,671 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"type": "string",
+			"metadata": "Data Factory name",
+			"defaultValue": "SCU-LOADTRACKINGDATA-ADF-DEV"
+		}
+	},
+	"variables": {
+		"factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('factoryName'), '/Load Tracking Data')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "LookupTrackingMetaData",
+						"description": "Looking up tracking master data",
+						"type": "Lookup",
+						"dependsOn": [
+							{
+								"activity": "StartJob",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "AzureSqlSource",
+								"sqlReaderQuery": "select * from TRK.vwTrackingMetaData",
+								"queryTimeout": "02:00:00",
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "TrackingMetaData",
+								"type": "DatasetReference"
+							},
+							"firstRowOnly": false
+						}
+					},
+					{
+						"name": "For Each Table To Load",
+						"type": "ForEach",
+						"dependsOn": [
+							{
+								"activity": "LookupTrackingMetaData",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"items": {
+								"value": "@activity('LookupTrackingMetaData').output.value",
+								"type": "Expression"
+							},
+							"isSequential": true,
+							"activities": [
+								{
+									"name": "Load TRK Staging Tables",
+									"type": "Copy",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [
+										{
+											"name": "Destination",
+											"value": "@{item().DestinationSchema}.@{item().DestinationTable}"
+										},
+										{
+											"name": "Source",
+											"value": "@{item().SourceQuery}"
+										}
+									],
+									"typeProperties": {
+										"source": {
+											"type": "MySqlSource",
+											"query": {
+												"value": "@{item().SourceQuery}",
+												"type": "Expression"
+											}
+										},
+										"sink": {
+											"type": "AzureSqlSink",
+											"preCopyScript": {
+												"value": "@{item().TruncateTable} ",
+												"type": "Expression"
+											},
+											"disableMetricsCollection": false
+										},
+										"enableStaging": false,
+										"parallelCopies": 1
+									},
+									"inputs": [
+										{
+											"referenceName": "MySqlTrackingTable",
+											"type": "DatasetReference"
+										}
+									],
+									"outputs": [
+										{
+											"referenceName": "DWTrackingTable",
+											"type": "DatasetReference",
+											"parameters": {
+												"TableName": "@{item().DestinationTable}",
+												"TableSchema": "@{item().DestinationSchema}"
+											}
+										}
+									]
+								},
+								{
+									"name": "LoadMainTable",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "Load TRK Staging Tables",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[TRK].[LoadDataFromStaging]",
+										"storedProcedureParameters": {
+											"TrackingMetaDataId": {
+												"value": {
+													"value": "@{item().TrackingMetaDataId}",
+													"type": "Expression"
+												},
+												"type": "Int32"
+											},
+											"SqlQueryName": {
+												"value": "LoadDWTableQuery",
+												"type": "String"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "DM360T",
+										"type": "LinkedServiceReference"
+									}
+								},
+								{
+									"name": "UpdateLastLoadedId",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "LoadMainTable",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[TRK].[LoadDataFromStaging]",
+										"storedProcedureParameters": {
+											"SqlQueryName": {
+												"value": "UpdateLastLoadedIdQuery",
+												"type": "String"
+											},
+											"TrackingMetaDataId": {
+												"value": {
+													"value": "@{item().TrackingMetaDataId}",
+													"type": "Expression"
+												},
+												"type": "Int32"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "DM360T",
+										"type": "LinkedServiceReference"
+									}
+								},
+								{
+									"name": "SP Error Loading TRK Staging Data",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "Load TRK Staging Tables",
+											"dependencyConditions": [
+												"Failed"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[TRK].[LogTrackingDataLoadError]",
+										"storedProcedureParameters": {
+											"ErrorSource": {
+												"value": "Copy Data - Load TRK Staging Tables",
+												"type": "String"
+											},
+											"ErrorText": {
+												"value": {
+													"value": "@item().SourceQuery",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"TrackingMetaDataId": {
+												"value": {
+													"value": "@{item().TrackingMetaDataId}",
+													"type": "Expression"
+												},
+												"type": "Int32"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "DM360T",
+										"type": "LinkedServiceReference"
+									}
+								},
+								{
+									"name": "SP Error LoadMainTable",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "LoadMainTable",
+											"dependencyConditions": [
+												"Failed"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[TRK].[LogTrackingDataLoadError]",
+										"storedProcedureParameters": {
+											"ErrorSource": {
+												"value": "Load Main Table",
+												"type": "String"
+											},
+											"ErrorText": {
+												"value": {
+													"value": "concat('Error in loading staging data from 360 tracking database for',{@item().LoadDWTableQuery})",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"TrackingMetaDataId": {
+												"value": {
+													"value": "@{item().TrackingMetaDataId}",
+													"type": "Expression"
+												},
+												"type": "Int32"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "DM360T",
+										"type": "LinkedServiceReference"
+									}
+								},
+								{
+									"name": "SP Error LUpdateLastLoadedId",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "UpdateLastLoadedId",
+											"dependencyConditions": [
+												"Failed"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[TRK].[LogTrackingDataLoadError]",
+										"storedProcedureParameters": {
+											"ErrorSource": {
+												"value": "Copy Data - Load TRK Staging Tables",
+												"type": "String"
+											},
+											"ErrorText": {
+												"value": {
+													"value": "concat('Error in loading staging data from 360 tracking database for',{@item().UpdateLastLoadedIdQuery})",
+													"type": "Expression"
+												},
+												"type": "String"
+											},
+											"TrackingMetaDataId": {
+												"value": {
+													"value": "@{item().TrackingMetaDataId}",
+													"type": "Expression"
+												},
+												"type": "Int32"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "DM360T",
+										"type": "LinkedServiceReference"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "StartJob",
+						"type": "SqlServerStoredProcedure",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"storedProcedureName": "[[Log].[StartJob]",
+							"storedProcedureParameters": {
+								"RunObjectName": {
+									"value": {
+										"value": "@pipeline().Pipeline",
+										"type": "Expression"
+									},
+									"type": "String"
+								},
+								"RunObjectType": {
+									"value": "AzureDataFactory",
+									"type": "String"
+								}
+							}
+						},
+						"linkedServiceName": {
+							"referenceName": "DM360T",
+							"type": "LinkedServiceReference"
+						}
+					},
+					{
+						"name": "EndJob",
+						"type": "SqlServerStoredProcedure",
+						"dependsOn": [
+							{
+								"activity": "ErrorFlag",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"storedProcedureName": "[[Log].[EndJob]",
+							"storedProcedureParameters": {
+								"RunObjectName": {
+									"value": {
+										"value": "@pipeline().Pipeline",
+										"type": "Expression"
+									},
+									"type": "String"
+								},
+								"RunObjectType": {
+									"value": "AzureDataFactory",
+									"type": "String"
+								}
+							}
+						},
+						"linkedServiceName": {
+							"referenceName": "DM360T",
+							"type": "LinkedServiceReference"
+						}
+					},
+					{
+						"name": "Lookup TotalTime",
+						"type": "Lookup",
+						"dependsOn": [
+							{
+								"activity": "EndJob",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "AzureSqlSource",
+								"sqlReaderStoredProcedureName": "[[Log].[GetJobTime]",
+								"storedProcedureParameters": {
+									"RunObjectName": {
+										"type": "String",
+										"value": {
+											"value": "@pipeline().Pipeline",
+											"type": "Expression"
+										}
+									},
+									"RunObjectType": {
+										"type": "String",
+										"value": {
+											"value": "AzureDataFactory",
+											"type": "Expression"
+										}
+									}
+								},
+								"queryTimeout": "02:00:00",
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "LogRunLog",
+								"type": "DatasetReference"
+							}
+						}
+					},
+					{
+						"name": "ErrorFlag",
+						"type": "SetVariable",
+						"dependsOn": [
+							{
+								"activity": "GetErrorFlag",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "ErrorFlag",
+							"value": {
+								"value": "@bool(activity('GetErrorFlag').output.firstRow.ErrorFlag)",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "GetErrorFlag",
+						"type": "Lookup",
+						"dependsOn": [
+							{
+								"activity": "For Each Table To Load",
+								"dependencyConditions": [
+									"Completed"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "AzureSqlSource",
+								"sqlReaderQuery": "select ErrorFlag, ErrorText\nfrom trk.vwGetCurrentErrors",
+								"queryTimeout": "02:00:00",
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "TrackingMetaData",
+								"type": "DatasetReference"
+							}
+						}
+					},
+					{
+						"name": "Send Email If Error",
+						"type": "IfCondition",
+						"dependsOn": [
+							{
+								"activity": "Lookup TotalTime",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"expression": {
+								"value": "@bool(variables('ErrorFlag'))",
+								"type": "Expression"
+							},
+							"ifFalseActivities": [
+								{
+									"name": "SendEmailOnCompletion",
+									"type": "WebActivity",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"url": "https://prod-16.southcentralus.logic.azure.com:443/workflows/ce593549a03247e5bb0c0524e1a16397/triggers/manual/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=iSVaTXaSStBDqUrZyRjrW3RpOa918-GsjwJuWSkE3So",
+										"method": "POST",
+										"body": {
+											"value": "{\n\"Message\":\"Azure Data Factory- @{pipeline().DataFactory} completed successfully\",\n\"EmailSource\":\"Azure Data Factory - @{pipeline().DataFactory} completed. \nTime taken: @{activity('Lookup TotalTime').output.FirstRow.TotalTimeTaken} \",\n\"EmailTo\":\"@{pipeline().parameters.EmailTo}\",\n\"Subject\":\"Azure Data Factory- @{pipeline().DataFactory} completed successfully\"\n}",
+											"type": "Expression"
+										}
+									}
+								}
+							],
+							"ifTrueActivities": [
+								{
+									"name": "SendEmailOnFailure",
+									"type": "WebActivity",
+									"dependsOn": [
+										{
+											"activity": "ErrorText",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"url": "https://prod-16.southcentralus.logic.azure.com:443/workflows/ce593549a03247e5bb0c0524e1a16397/triggers/manual/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=iSVaTXaSStBDqUrZyRjrW3RpOa918-GsjwJuWSkE3So",
+										"method": "POST",
+										"body": {
+											"value": "{\n\"EmailSource\":\"Azure Data Factory - @{pipeline().DataFactory}\",\n\"Subject\":\"Azure Data Factory - @{pipeline().DataFactory} Failed\",\n\"Message\":\"Azure Data Factory - @{pipeline().DataFactory} failed. \nError in executing dynamic query - @{variables('ErrorText')} Please contact PK ITteam\",\n\"EmailTo\":\"@{pipeline().parameters.EmailTo}\"\n}",
+											"type": "Expression"
+										}
+									}
+								},
+								{
+									"name": "ErrorText",
+									"type": "SetVariable",
+									"dependsOn": [],
+									"userProperties": [],
+									"typeProperties": {
+										"variableName": "ErrorText",
+										"value": {
+											"value": "@string(activity('GetErrorFlag').output.firstRow.ErrorText)",
+											"type": "Expression"
+										}
+									}
+								}
+							]
+						}
+					}
+				],
+				"parameters": {
+					"EmailTo": {
+						"type": "string",
+						"defaultValue": "datamanagement@360Training.com"
+					}
+				},
+				"variables": {
+					"ErrorFlag": {
+						"type": "Boolean"
+					},
+					"ErrorText": {
+						"type": "String",
+						"defaultValue": "default"
+					}
+				},
+				"annotations": []
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/Trigger360TrackingData')]",
+			"type": "Microsoft.DataFactory/factories/triggers",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"runtimeState": "Stopped",
+				"pipelines": [
+					{
+						"pipelineReference": {
+							"referenceName": "Load Tracking Data",
+							"type": "PipelineReference"
+						}
+					}
+				],
+				"type": "ScheduleTrigger",
+				"typeProperties": {
+					"recurrence": {
+						"frequency": "Day",
+						"interval": 1,
+						"startTime": "2020-04-27T19:23:00Z",
+						"timeZone": "UTC",
+						"schedule": {
+							"minutes": [
+								0
+							],
+							"hours": [
+								8
+							]
+						}
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/pipelines/Load Tracking Data')]"
+			]
+		}
+	]
+}
